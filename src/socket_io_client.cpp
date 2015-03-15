@@ -8,7 +8,8 @@
  */
 
 #include "socket_io_client.hpp"
-
+#include <sstream>
+using std::stringstream;
 // Comment this out to disable handshake logging to stdout
 #define LOG(x) std::cout << x
 //#define LOG(x)
@@ -16,6 +17,9 @@
 using socketio::socketio_client_handler;
 using socketio::socketio_events;
 using websocketpp::client;
+using boost::asio::ip::tcp;
+
+
 
 // Event handlers
 
@@ -43,9 +47,9 @@ void socketio_client_handler::on_open(connection_ptr con)
    m_con = con;
    // Create the heartbeat timer and use the same io_service as the main event loop.
 #ifndef BOOST_NO_CXX11_SMART_PTR
-   m_heartbeatTimer = std::unique_ptr<boost::asio::deadline_timer>(new boost::asio::deadline_timer(con->get_io_service(), boost::posix_time::seconds(0)));
+   m_heartbeatTimer = std::unique_ptr<boost::asio::deadline_timer>(new boost::asio::deadline_timer(m_client->get_io_service(), boost::posix_time::seconds(0)));
 #else
-   m_heartbeatTimer = boost::shared_ptr<boost::asio::deadline_timer>(new boost::asio::deadline_timer(con->get_io_service(), boost::posix_time::seconds(0)));
+   m_heartbeatTimer = boost::shared_ptr<boost::asio::deadline_timer>(new boost::asio::deadline_timer(m_client->get_io_service(), boost::posix_time::seconds(0)));
 #endif
    start_heartbeat();
    m_connected = true;
@@ -94,8 +98,8 @@ std::string socketio_client_handler::perform_handshake(std::string url, std::str
    // Form initial post request.
    boost::asio::streambuf request;
    std::ostream reqstream(&request);
-
-   reqstream << "POST " << socketIoResource << "/1/ HTTP/1.0\r\n";
+   //?EIO=3&transport=polling
+   reqstream << "POST " << socketIoResource << "/1/ HTTP/1.1\r\n";
    reqstream << "Host: " << uo.get_host() << "\r\n";
    reqstream << "Accept: */*\r\n";
    reqstream << "Connection: close\r\n\r\n";
@@ -140,7 +144,7 @@ std::string socketio_client_handler::perform_handshake(std::string url, std::str
    if (!resp_stream || httpver.substr(0, 5) != "HTTP/")
    {
       std::cerr << "Invalid HTTP protocol: " << httpver << std::endl;
-      throw websocketpp::exception("Socket.IO Handshake: Invalid HTTP protocol: " + httpver, websocketpp::error::GENERIC);
+      throw websocketpp::exception("Socket.IO Handshake: Invalid HTTP protocol: " + httpver, websocketpp::error::general);
    }
    switch (status)
    {
@@ -150,11 +154,11 @@ std::string socketio_client_handler::perform_handshake(std::string url, std::str
    case(401):
    case(503):
       std::cerr << "Server rejected client connection" << std::endl;
-      throw websocketpp::exception("Socket.IO Handshake: Server rejected connection with code " + status, websocketpp::error::GENERIC);
+      throw websocketpp::exception("Socket.IO Handshake: Server rejected connection with code " + status, websocketpp::error::general);
       break;
    default:
       std::cerr << "Server returned unknown status code: " << status << std::endl;
-      throw websocketpp::exception("Socket.IO Handshake: Server responded with unknown code " + status, websocketpp::error::GENERIC);
+      throw websocketpp::exception("Socket.IO Handshake: Server responded with unknown code " + status, websocketpp::error::general);
       break;
    }
 
@@ -178,7 +182,7 @@ std::string socketio_client_handler::perform_handshake(std::string url, std::str
       if (m_transports.find("websocket") == std::string::npos)
       {
          std::cerr << "Server does not support websocket transport: " << m_transports << std::endl;
-         websocketpp::exception("Socket.IO Handshake: Server does not support websocket transport", websocketpp::error::GENERIC);
+         websocketpp::exception("Socket.IO Handshake: Server does not support websocket transport", websocketpp::error::general);
       }
    }
 
@@ -203,8 +207,9 @@ void socketio_client_handler::send(const std::string &msg)
       std::cerr << "Error: No active session" << std::endl;
       return;
    }
-
-   m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Sent: " << msg << websocketpp::log::endl;
+   stringstream ss;
+   ss << "Sent: " << msg << "\n";
+   m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
    m_con->send(msg);
 }
 
@@ -307,7 +312,7 @@ void socketio_client_handler::close()
    }
 
    send(3, "disconnect", "");
-   m_con->close(websocketpp::close::status::GOING_AWAY, "");
+   m_con->close(websocketpp::close::status::going_away, "");
 }
 
 void socketio_client_handler::start_heartbeat()
@@ -322,7 +327,9 @@ void socketio_client_handler::start_heartbeat()
       m_heartbeatActive = true;
       m_heartbeatTimer->async_wait(boost::bind(&socketio_client_handler::heartbeat, this));
 
-      m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Sending heartbeats. Timeout: " << m_heartbeatTimeout << websocketpp::log::endl;
+      stringstream ss;
+      ss << "Sending heartbeats. Timeout: " << m_heartbeatTimeout << "\n";
+      m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str());
    }
 }
 
@@ -336,7 +343,11 @@ void socketio_client_handler::stop_heartbeat()
    m_heartbeatTimer->cancel();
 
    if (m_con)
-      m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Stopped sending heartbeats." << websocketpp::log::endl;
+   {
+     stringstream ss ;
+     ss << "Stopped sending heartbeats." << "\n";
+     m_client->get_alog().write(websocketpp::log::alevel::devel,ss.str());
+   }
 }
 
 void socketio_client_handler::send_heartbeat()
@@ -344,7 +355,9 @@ void socketio_client_handler::send_heartbeat()
    if (m_con)
    {
       m_con->send("2::");
-      m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Sent Heartbeat" << websocketpp::log::endl;
+      stringstream ss;
+      ss << "Sent Heartbeat" << "\n";
+      m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str());
    }
 }
 
@@ -377,114 +390,146 @@ void socketio_client_handler::parse_message(const std::string &msg)
       // Store second param for parsing as message id. Not every type has this, so if it's missing we just use 0 as the ID.
       std::stringstream convertId(matches[2]);
       if (!(convertId >> msgId)) msgId = 0;
-
+      stringstream ss;
       switch (type)
       {
       // Disconnect
       case (0):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received message type 0 (Disconnect)" << websocketpp::log::endl;
-         close();
+	ss << "Received message type 0 (Disconnect)\n";
+	m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str());
+	close();
          break;
       // Connection Acknowledgement
       case (1):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received Message type 1 (Connect): " << msg << websocketpp::log::endl;
+	ss << "Received Message type 1 (Connect): " << msg << "\n";
+	m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
          break;
       // Heartbeat
       case (2):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received Message type 2 (Heartbeat)" << websocketpp::log::endl;
+	 ss << "Received Message type 2 (Heartbeat)" << "\n";
+         m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str());
          send_heartbeat();
          break;
       // Message
       case (3):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received Message type 3 (Message): " << msg << websocketpp::log::endl;
+	ss << "Received Message type 3 (Message): " << msg << "\n";
+	m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
          on_socketio_message(msgId, matches[3], matches[4]);
          break;
       // JSON Message
       case (4):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received Message type 4 (JSON Message): " << msg << websocketpp::log::endl;
+	 ss << "Received Message type 4 (JSON Message): " << msg << "\n";
+         m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
          // Parse JSON
          if (json.Parse<0>(matches[4].str().c_str()).HasParseError())
          {
-            m_con->elog()->at(websocketpp::log::elevel::WARN) << "JSON Parse Error: " << matches[4] << websocketpp::log::endl;
+	   stringstream ss2;
+	   ss2 << "JSON Parse Error: " << matches[4] << "\n";
+	   m_client->get_elog().write(websocketpp::log::elevel::warn, ss2.str()) ;
             return;
          }
          on_socketio_json(msgId, matches[3], json);
          break;
       // Event
       case (5):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received Message type 5 (Event): " << msg << websocketpp::log::endl;
+	 ss << "Received Message type 5 (Event): " << msg << "\n";
+         m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
          // Parse JSON
          if (json.Parse<0>(matches[4].str().c_str()).HasParseError())
          {
-            m_con->elog()->at(websocketpp::log::elevel::WARN) << "JSON Parse Error: " << matches[4] << websocketpp::log::endl;
-            return;
+	   stringstream ss2;
+	   ss2 << "JSON Parse Error: " << matches[4] << "\n";
+	   m_client->get_elog().write(websocketpp::log::elevel::warn, ss2.str()) ;
+	   return;
          }
          if (!json["name"].IsString())
          {
-            m_con->elog()->at(websocketpp::log::elevel::WARN) << "Invalid socket.IO Event" << websocketpp::log::endl;
+	   stringstream ss2;
+	   ss2 << "Invalid socket.IO Event" << "\n";
+	   m_client->get_elog().write(websocketpp::log::elevel::warn,ss2.str());
             return;
          }
          on_socketio_event(msgId, matches[3], json["name"].GetString(), json["args"]);
          break;
       // Ack
       case (6):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received Message type 6 (ACK)" << websocketpp::log::endl;
+	ss << "Received Message type 6 (ACK)" << "\n";
+	m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
          on_socketio_ack(matches[4]);
          break;
       // Error
       case (7):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received Message type 7 (Error): " << msg << websocketpp::log::endl;
+	 ss << "Received Message type 7 (Error): " << msg << "\n";
+         m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()); 
          on_socketio_error(matches[3], matches[4].str().substr(0, matches[4].str().find("+")), matches[4].str().substr(matches[4].str().find("+")+1));
          break;
       // Noop
       case (8):
-         m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received Message type 8 (Noop)" << websocketpp::log::endl;
+ 	ss << "Received Message type 8 (Noop)" << "\n";
+	m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
          break;
       default:
-         m_con->elog()->at(websocketpp::log::elevel::WARN) << "Invalid Socket.IO message type: " << type << websocketpp::log::endl;
+	 ss << "Invalid Socket.IO message type: " << type << "\n";
+         m_client->get_elog().write(websocketpp::log::elevel::warn, ss.str()) ;
          break;
       }
    }
    else
    {
-      m_con->elog()->at(websocketpp::log::elevel::WARN) << "Non-Socket.IO message: " << msg << websocketpp::log::endl;
+     stringstream ss;
+      ss << "Non-Socket.IO message: " << msg << "\n";
+      m_client->get_elog().write(websocketpp::log::elevel::warn, ss.str());
    }
 }
 
 // This is where you'd add in behavior to handle the message data for your own app.
 void socketio_client_handler::on_socketio_message(int msgId, std::string msgEndpoint, std::string data)
 {
-   m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received message (" << msgId << ") " << data << websocketpp::log::endl;
+  stringstream ss;
+   ss << "Received message (" << msgId << ") " << data << "\n";
+   m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
 }
 
 // This is where you'd add in behavior to handle json messages.
 void socketio_client_handler::on_socketio_json(int msgId, std::string msgEndpoint, Document& json)
 {
-   m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received JSON Data (" << msgId << ")" << websocketpp::log::endl;
+  stringstream ss;
+ ss   << "Received JSON Data (" << msgId << ")" << "\n";
+ m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
 }
 
 // This is where you'd add in behavior to handle events.
 // By default, nothing is done with the endpoint or ID params.
 void socketio_client_handler::on_socketio_event(int msgId, std::string msgEndpoint, std::string name, const Value& args)
 {
-   m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received event (" << msgId << ") " << websocketpp::log::endl;
+  stringstream ss;
+   ss << "Received event (" << msgId << ") " << "\n";
+   m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
 
    if (m_events.count(name) > 0)
    {
       socketio_events events;
       m_events[name](events, args);
    }
-   else m_con->elog()->at(websocketpp::log::elevel::WARN) << "No bound event with name: " << name << websocketpp::log::endl;
+   else {
+     stringstream ss;
+     ss << "No bound event with name: " << name << "\n";
+     m_client->get_elog().write(websocketpp::log::elevel::warn, ss.str());
+   }
 }
 
 // This is where you'd add in behavior to handle ack
 void socketio_client_handler::on_socketio_ack(std::string data)
 {
-   m_con->alog()->at(websocketpp::log::alevel::DEVEL) << "Received ACK: " << data << websocketpp::log::endl;
+  stringstream ss;
+  ss << "Received ACK: " << data << "\n"; 
+  m_client->get_alog().write(websocketpp::log::alevel::devel, ss.str()) ;
 }
 
 // This is where you'd add in behavior to handle errors
 void socketio_client_handler::on_socketio_error(std::string endpoint, std::string reason, std::string advice)
 {
-   m_con->alog()->at(websocketpp::log::elevel::RERROR) << "Received Error: " << reason << " Advice: " << advice << websocketpp::log::endl;
+  stringstream ss;
+  ss << "Received Error: " << reason << " Advice: " << advice << "\n";
+  m_client->get_alog().write(websocketpp::log::elevel::rerror, ss.str());
 }

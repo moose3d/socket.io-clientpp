@@ -8,40 +8,50 @@
  * in the output of the application with full logging enabled.
  */
 
-#include "stdafx.h"
-#include <socket_io_client.hpp>
+//#include "stdafx.h"
 
+#include <socket_io_client.hpp>
+#include <thread>
+#include <chrono>
+#include <boost/thread/thread.hpp>
+#include <websocketpp/config/asio_no_tls_client.hpp>
 using namespace socketio;
 
 int main(int /*argc*/, char* /*argv*/ []) {
    // websocket++ expects urls to begin with "ws://" not "http://"
-   std::string uri = "ws://localhost:8080/";
+   std::string uri = "ws://127.0.0.1:8080";
 
    try {
       // Create and link handler to websocket++ callbacks.
       socketio_client_handler_ptr handler(new socketio_client_handler());
-      client::connection_ptr con;
-      client endpoint(handler);
+      client<websocketpp::config::asio_client>::connection_ptr con;
+      client<websocketpp::config::asio_client>  endpoint;//(handler);
+      handler->set_client(&endpoint);
 
       // Set log level. Leave these unset for no logging, or only set a few for selective logging.
-      endpoint.elog().set_level(websocketpp::log::elevel::RERROR);
-      endpoint.elog().set_level(websocketpp::log::elevel::FATAL);
-      endpoint.elog().set_level(websocketpp::log::elevel::WARN);
-      endpoint.alog().set_level(websocketpp::log::alevel::DEVEL);
+      
+      endpoint.get_elog().set_channels(websocketpp::log::elevel::rerror|
+				       websocketpp::log::elevel::fatal |
+				       websocketpp::log::elevel::warn);
+      endpoint.get_alog().set_channels(websocketpp::log::alevel::devel);
 
       std::string socket_io_uri = handler->perform_handshake(uri);
-      con = endpoint.get_connection(socket_io_uri);
-
+      websocketpp::lib::error_code ec;
+      con = endpoint.get_connection(socket_io_uri, ec);
+      if (ec) {
+	std::cout << "> Connect initialization error: " << ec.message() << std::endl;
+	return -1;
+      }
       // The previous two lines can be combined:
       // con = endpoint.get_connection(handler->perform_handshake(uri));
 
       endpoint.connect(con);
 
-      boost::thread t(boost::bind(&client::run, &endpoint, false));
+      boost::thread t(boost::bind(&client<websocketpp::config::asio_client>::run, &endpoint));
 
       // Wait for a sec before sending stuff
       while (!handler->connected()) {
-         Sleep(1);
+	std::this_thread::sleep_for (std::chrono::seconds(1));	 
       }
 
       handler->bind_event("example", &socketio_events::example);
@@ -60,7 +70,7 @@ int main(int /*argc*/, char* /*argv*/ []) {
 
       std::getchar();
 
-      endpoint.stop(false);
+      endpoint.stop();
    }
    catch (std::exception& e) {
       std::cerr << "Exception: " << e.what() << std::endl;
