@@ -1,4 +1,5 @@
 var io = require('socket.io').listen(8080);
+io.use('transports', ["websocket", "polling"]);
 
 var chat = io
   .of('/chat')
