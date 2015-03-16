@@ -33,18 +33,18 @@ void socketio_events::example(const Value& args)
 
 // Websocket++ client handler
 
-void socketio_client_handler::on_fail(connection_ptr con)
+void socketio_client_handler::on_fail(client<websocketpp::config::asio_client> * c, websocketpp::connection_hdl con)
 {
    stop_heartbeat();
-   m_con = connection_ptr();
+   m_con = c->get_con_from_hdl(con);
    m_connected = false;
 
    LOG("Connection failed." << std::endl);
 }
 
-void socketio_client_handler::on_open(connection_ptr con)
+void socketio_client_handler::on_open(client<websocketpp::config::asio_client> * c, websocketpp::connection_hdl con)
 {
-   m_con = con;
+  m_con = c->get_con_from_hdl(con);
    // Create the heartbeat timer and use the same io_service as the main event loop.
 #ifndef BOOST_NO_CXX11_SMART_PTR
    m_heartbeatTimer = std::unique_ptr<boost::asio::deadline_timer>(new boost::asio::deadline_timer(m_client->get_io_service(), boost::posix_time::seconds(0)));
@@ -57,16 +57,16 @@ void socketio_client_handler::on_open(connection_ptr con)
    LOG("Connected." << std::endl);
 }
 
-void socketio_client_handler::on_close(connection_ptr con)
+void socketio_client_handler::on_close(client<websocketpp::config::asio_client> * c, websocketpp::connection_hdl con)
 {  
    stop_heartbeat();
    m_connected = false;
-   m_con = connection_ptr();
+   m_con = c->get_con_from_hdl(con);
 
    LOG("Client Disconnected." << std::endl);
 }
 
-void socketio_client_handler::on_message(connection_ptr con, message_ptr msg)
+void socketio_client_handler::on_message(websocketpp::connection_hdl con, socketio::message_ptr msg)
 {
    // Parse the incoming message according to socket.IO rules
    parse_message(msg->get_payload());
@@ -166,6 +166,10 @@ std::string socketio_client_handler::perform_handshake(std::string url, std::str
    std::string body;
 
    std::getline(resp_stream, body, '\0');
+   std::cout << "DEBUG: '" <<body << "'\n";
+   std::size_t pos = body.find_first_of('\n');
+   pos = body.find_first_not_of('\n',pos);
+   body.erase(0,pos);
    boost::cmatch matches;
    const boost::regex expression("([0-9a-zA-Z_-]*):([0-9]*):([0-9]*):(.*)");
 

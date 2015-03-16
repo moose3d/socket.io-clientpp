@@ -70,10 +70,10 @@ namespace socketio {
     }
 
     // Callbacks
-    void on_fail(connection_ptr con);
-    void on_open(connection_ptr con);
-    void on_close(connection_ptr con);
-    void on_message(connection_ptr con, message_ptr msg);
+    void on_fail(client<websocketpp::config::asio_client> * c, websocketpp::connection_hdl con);
+    void on_open(client<websocketpp::config::asio_client> * c, websocketpp::connection_hdl con);
+    void on_close(client<websocketpp::config::asio_client> * c, websocketpp::connection_hdl con);
+    void on_message(websocketpp::connection_hdl con, socketio::message_ptr msg);
 
     // Client Functions - such as send, etc.
 
